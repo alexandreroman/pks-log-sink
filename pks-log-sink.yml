@@ -1,0 +1,76 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pks-log-sink
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pks-log-sink
+  namespace: pks-log-sink
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pks-log-sink
+  template:
+    metadata:
+      labels:
+        app: pks-log-sink
+    spec:
+      containers:
+      - name: pks-log-sink
+        image: "alexandreroman/pks-log-sink:1"
+        ports:
+        - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pks-log-sink-lb
+  labels:
+    app: pks-log-sink
+  namespace: pks-log-sink
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    protocol: TCP
+    targetPort: 8080
+  selector:
+    app: pks-log-sink
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: syslog-router
+spec:
+  selector:
+    matchLabels:
+      name: syslog-router
+  template:
+    metadata:
+      labels:
+        name: syslog-router
+    spec:
+      containers:
+        - env:
+            - name: SYSLOG_TAG
+              value: '{{ index .Container.Config.Labels "io.kubernetes.pod.namespace" }}[{{ index .Container.Config.Labels "io.kubernetes.pod.name" }}]'
+            - name: SYSLOG_HOSTNAME
+              value: '{{ index .Container.Config.Labels "io.kubernetes.container.name" }}'
+            - name: ROUTE_URIS
+              valueFrom:
+                secretKeyRef:
+                  name: syslog-destination
+                  key: syslog-destination
+          image: gliderlabs/logspout:master
+          name: logspout
+          volumeMounts:
+            - name: log
+              mountPath: /var/run/docker.sock
+      volumes:
+        - name: log
+          hostPath:
+              path: /var/vcap/data/sys/run/docker/docker.sock
